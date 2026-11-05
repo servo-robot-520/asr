@@ -40,10 +40,10 @@ namespace asr {
     }
 
     void AsrNode::declare_parameters() {
-        // audio_io 的默认节点名来自 audio_io_interface，不在本包重复配置；
-        // 只把它限定到 asr 当前 namespace，再用官方 helper 生成话题名。
-        audio_io_node_ = audio_io_interface::qualify_node_fqn(node_->get_namespace());
-        capture_topic_ = audio_io_interface::topic_capture(audio_io_node_);
+        // audio_io 的默认节点名由 audio_io_interface 提供；topic_capture()
+        // 会先用当前 asr 的 namespace 限定节点名，再生成采集话题。
+        capture_topic_ = audio_io_interface::topic_capture(
+            audio_io_interface::kDefaultNodeFqn, node_->get_namespace());
         stream_id_ = declare_or_get<std::string>("capture.stream_id", "mic");
         frame_id_ = declare_or_get<std::string>("frame_id", "mic");
 
@@ -108,7 +108,8 @@ namespace asr {
                 on_capture(message);
             });
 
-        const auto audio_event_topic = audio_io_interface::topic_event(audio_io_node_);
+        const auto audio_event_topic = audio_io_interface::topic_event(
+            audio_io_interface::kDefaultNodeFqn, node_->get_namespace());
         audio_event_subscription_ = node_->create_subscription<audio_io_interface::msg::AudioEvent>(
             audio_event_topic, rclcpp::QoS(50),
             [this](const audio_io_interface::msg::AudioEvent::SharedPtr message) {

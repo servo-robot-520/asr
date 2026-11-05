@@ -178,12 +178,12 @@ python3 install/asr/share/asr/tools/replay_capture.py /path/to/test.wav
 `audio_io` 的节点全名不通过参数配置：
 
 ```text
-audio_io_fqn  = audio_io_interface::qualify_node_fqn(asr 的 namespace)
-capture.topic = audio_io_interface::topic_capture(audio_io_fqn)
-audio_io 事件 = audio_io_interface::topic_event(audio_io_fqn)
+capture.topic = audio_io_interface::topic_capture(kDefaultNodeFqn, asr 的 namespace)
+audio_io 事件 = audio_io_interface::topic_event(kDefaultNodeFqn, asr 的 namespace)
 ```
 
-因此 `audio_io` 与 `asr` 使用同一 namespace 时无需修改任何配置文件。
+`topic_capture()` / `topic_event()` 内部调用 `qualify_node_fqn()`，因此 `audio_io` 与 `asr`
+使用同一 namespace 时无需修改任何配置文件。
 
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |

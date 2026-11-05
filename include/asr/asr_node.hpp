@@ -116,7 +116,6 @@ namespace asr {
 
         std::string capture_topic_;
         std::string stream_id_;
-        std::string audio_io_node_;
         std::string frame_id_;
 
         bool gate_enabled_{true};

@@ -49,7 +49,6 @@ namespace asr {
         gate_max_ms_ = std::max(gate_holdoff_ms_, declare_or_get<int>("gate.max_ms", 15000));
         state_period_ms_ = std::max(50, declare_or_get<int>("state.period_ms", 500));
         queue_max_ms_ = std::max(100, declare_or_get<int>("queue.max_ms", 2000));
-        max_queue_frames_ = static_cast<std::size_t>(queue_max_ms_) * 48;
     }
 
     void AsrNode::initialize_backends() {
@@ -215,11 +214,20 @@ namespace asr {
 
         {
             std::lock_guard lock(queue_mutex_);
-            queued_frames_ += chunk.frames;
-            while (queued_frames_ > max_queue_frames_ && queue_.size() > 1) {
-                queued_frames_ -= queue_.front().frames;
+            const double chunk_ms = chunk.sample_rate > 0
+                ? 1000.0 * static_cast<double>(chunk.frames) /
+                    static_cast<double>(chunk.sample_rate)
+                : 0.0;
+            queued_ms_ += chunk_ms;
+            while (queued_ms_ > static_cast<double>(queue_max_ms_) && queue_.size() > 1) {
+                const auto& front = queue_.front();
+                queued_ms_ -= front.sample_rate > 0
+                    ? 1000.0 * static_cast<double>(front.frames) /
+                        static_cast<double>(front.sample_rate)
+                    : 0.0;
                 queue_.pop_front();
             }
+            queued_ms_ = std::max(0.0, queued_ms_);
             queue_.push_back(std::move(chunk));
         }
         queue_cv_.notify_one();
@@ -287,7 +295,7 @@ namespace asr {
         {
             std::lock_guard lock(queue_mutex_);
             queue_.clear();
-            queued_frames_ = 0;
+            queued_ms_ = 0.0;
         }
         const bool was_active = session_active_.exchange(false);
         if (was_active) {
@@ -308,7 +316,11 @@ namespace asr {
                 }
                 chunk = std::move(queue_.front());
                 queue_.pop_front();
-                queued_frames_ -= chunk.frames;
+                queued_ms_ -= chunk.sample_rate > 0
+                    ? 1000.0 * static_cast<double>(chunk.frames) /
+                        static_cast<double>(chunk.sample_rate)
+                    : 0.0;
+                queued_ms_ = std::max(0.0, queued_ms_);
             }
 
             if (reset_requested_.exchange(false)) {

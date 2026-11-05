@@ -128,8 +128,7 @@ namespace asr {
         std::deque<CaptureChunk> queue_;
         mutable std::mutex queue_mutex_;
         std::condition_variable queue_cv_;
-        std::size_t queued_frames_{0};
-        std::size_t max_queue_frames_{0};
+        double queued_ms_{0.0};
 
         std::thread worker_;
         std::atomic<bool> running_{false};

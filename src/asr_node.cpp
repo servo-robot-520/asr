@@ -7,7 +7,6 @@
 #include <string_view>
 #include <utility>
 
-#include "asr/ros_names.hpp"
 #include "asr_interface/ros_msg.hpp"
 #include "audio_io_interface/ros_msg.hpp"
 #include "common_cpp/logging/log_interface/log_macro.hpp"
@@ -43,7 +42,7 @@ namespace asr {
     void AsrNode::declare_parameters() {
         // audio_io 的默认节点名来自 audio_io_interface，不在本包重复配置；
         // 只把它限定到 asr 当前 namespace，再用官方 helper 生成话题名。
-        audio_io_node_ = qualify_node_fqn(node_->get_namespace(), audio_io_interface::kDefaultNodeFqn);
+        audio_io_node_ = audio_io_interface::qualify_node_fqn(node_->get_namespace());
         capture_topic_ = audio_io_interface::topic_capture(audio_io_node_);
         stream_id_ = declare_or_get<std::string>("capture.stream_id", "mic");
         frame_id_ = declare_or_get<std::string>("frame_id", "mic");

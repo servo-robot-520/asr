@@ -84,7 +84,7 @@ namespace asr {
         return spotter_ != nullptr && stream_ != nullptr;
     }
 
-    std::vector<BackendEvent> KeywordBackend::push(const float* samples, std::size_t count) {
+    std::vector<BackendEvent> KeywordBackend::push(const float* samples, const std::size_t count) {
         std::vector<BackendEvent> events;
         if (!ok() || samples == nullptr || count == 0) {
             return events;

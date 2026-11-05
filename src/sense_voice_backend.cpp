@@ -36,7 +36,7 @@ namespace asr {
         return recognizer_.ok() && vad_.ok();
     }
 
-    std::vector<BackendEvent> SenseVoiceBackend::push(const float* samples, std::size_t count) {
+    std::vector<BackendEvent> SenseVoiceBackend::push(const float* samples, const std::size_t count) {
         std::vector<BackendEvent> events;
         if (!ok() || samples == nullptr || count == 0) {
             return events;

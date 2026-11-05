@@ -15,10 +15,15 @@ namespace asr {
     ///
     /// 新增后端 = 实现 AsrBackend + 在 backend_factory.cpp 增加一个分支；
     /// AsrNode 不直接依赖任何具体后端实现。
+    /// @param backend_type `sense_voice` 或 `keyword`
+    /// @param node 用于声明/读取后端参数
+    /// @param error 未知后端时写入英文原因
     [[nodiscard]] std::unique_ptr<AsrBackend>
-    create_backend(const std::string_view backend_type, rclcpp::Node& node, std::string* error);
+    create_backend(std::string_view backend_type, rclcpp::Node& node, std::string* error);
 
     /// 创建唤醒词检测器；使用 keyword.* 的 KWS 模型和 wake.keywords_file。
+    /// @param node 用于声明/读取唤醒参数
+    /// @param error 词表/模型缺失时写入原因
     [[nodiscard]] std::unique_ptr<WakeWordDetector>
     create_wake_word_detector(rclcpp::Node& node, std::string* error);
 

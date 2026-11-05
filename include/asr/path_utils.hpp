@@ -7,6 +7,7 @@
 namespace asr {
 
     /// 展开以 "~/" 开头的用户路径；其他路径原样返回。
+    /// @param path 可能以 `~/` 开头的路径
     inline std::string expand_user_path(const std::string_view path) {
         if (path.size() < 2 || path[0] != '~' || path[1] != '/') {
             return std::string{path};

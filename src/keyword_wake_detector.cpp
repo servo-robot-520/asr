@@ -36,8 +36,7 @@ namespace asr {
                 if (at == std::string::npos) {
                     continue;
                 }
-                auto label = trim(line.substr(at + 1));
-                if (!label.empty()) {
+                if (auto label = trim(line.substr(at + 1)); !label.empty()) {
                     labels.push_back(std::move(label));
                 }
             }
@@ -69,7 +68,7 @@ namespace asr {
         return backend_.ok() && !labels_.empty();
     }
 
-    std::vector<WakeEvent> KeywordWakeDetector::push(const float* samples, std::size_t count) {
+    std::vector<WakeEvent> KeywordWakeDetector::push(const float* samples, const std::size_t count) {
         std::vector<WakeEvent> wakes;
         for (auto& event : backend_.push(samples, count)) {
             if (event.type == BackendEventType::Final && !event.text.empty()) {

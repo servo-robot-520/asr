@@ -36,13 +36,17 @@ namespace asr {
     /// 调用方用 detected() 判断是否进入语音，用 empty()/pop() 取已完成的段。
     class VadSegmenter {
     public:
+        /// 构造空 VAD；模型在 initialize() 中加载。
         VadSegmenter() = default;
+        /// 释放 sherpa-onnx VAD 句柄。
         ~VadSegmenter();
 
         VadSegmenter(const VadSegmenter&) = delete;
         VadSegmenter& operator=(const VadSegmenter&) = delete;
 
         /// 加载 VAD 模型；失败时 error 写入英文原因。
+        /// @param config VAD 模型/阈值/窗口配置
+        /// @param error 失败原因
         [[nodiscard]] bool initialize(const VadConfig& config, std::string* error);
 
         /// VAD 是否已成功加载。
@@ -51,6 +55,8 @@ namespace asr {
         }
 
         /// 送入任意长度的 16 kHz mono float 样本。
+        /// @param samples 16 kHz mono float 采样
+        /// @param count 采样数
         void accept(const float* samples, std::size_t count);
 
         /// 当前是否处于语音中。
@@ -69,9 +75,9 @@ namespace asr {
         void reset();
 
     private:
-        const SherpaOnnxVoiceActivityDetector* vad_{nullptr};
-        std::vector<float> pending_;
-        int32_t window_size_{512};
+        const SherpaOnnxVoiceActivityDetector* vad_{nullptr}; ///< sherpa-onnx VAD 句柄
+        std::vector<float> pending_; ///< 不足一个 window_size 的尾部样本
+        int32_t window_size_{512}; ///< VAD 输入窗口样本数
     };
 
 } // namespace asr

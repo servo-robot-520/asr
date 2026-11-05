@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <ranges>
 #include <stdexcept>
 #include <string_view>
 #include <utility>
@@ -222,14 +223,14 @@ namespace asr {
             std::lock_guard lock(queue_mutex_);
             const double chunk_ms = chunk.sample_rate > 0
                 ? 1000.0 * static_cast<double>(chunk.frames) /
-                    static_cast<double>(chunk.sample_rate)
+                static_cast<double>(chunk.sample_rate)
                 : 0.0;
             queued_ms_ += chunk_ms;
             while (queued_ms_ > static_cast<double>(queue_max_ms_) && queue_.size() > 1) {
                 const auto& front = queue_.front();
                 queued_ms_ -= front.sample_rate > 0
                     ? 1000.0 * static_cast<double>(front.frames) /
-                        static_cast<double>(front.sample_rate)
+                    static_cast<double>(front.sample_rate)
                     : 0.0;
                 queue_.pop_front();
             }
@@ -263,8 +264,8 @@ namespace asr {
                 cancel_session = !pause_wake_session;
             }
             else if (message->event == audio_io_interface::msg::AudioEvent::EVENT_FINISHED ||
-                     message->event == audio_io_interface::msg::AudioEvent::EVENT_FAILED ||
-                     message->event == audio_io_interface::msg::AudioEvent::EVENT_PREEMPTED) {
+                message->event == audio_io_interface::msg::AudioEvent::EVENT_FAILED ||
+                message->event == audio_io_interface::msg::AudioEvent::EVENT_PREEMPTED) {
                 if (active_playbacks_ > 0) {
                     --active_playbacks_;
                 }
@@ -335,7 +336,7 @@ namespace asr {
                 queue_.pop_front();
                 queued_ms_ -= chunk.sample_rate > 0
                     ? 1000.0 * static_cast<double>(chunk.frames) /
-                        static_cast<double>(chunk.sample_rate)
+                    static_cast<double>(chunk.sample_rate)
                     : 0.0;
                 queued_ms_ = std::max(0.0, queued_ms_);
             }
@@ -446,12 +447,11 @@ namespace asr {
         if (pre_roll_.size() > pre_roll_capacity_) {
             pre_roll_.erase(pre_roll_.begin(),
                             pre_roll_.begin() +
-                                static_cast<std::ptrdiff_t>(pre_roll_.size() - pre_roll_capacity_));
+                            static_cast<std::ptrdiff_t>(pre_roll_.size() - pre_roll_capacity_));
         }
 
         if (wake_detector_) {
-            const auto wakes = wake_detector_->push(samples.data(), samples.size());
-            if (!wakes.empty()) {
+            if (const auto wakes = wake_detector_->push(samples.data(), samples.size()); !wakes.empty()) {
                 start_wake_session(wakes.front().keyword, samples);
             }
         }
@@ -656,11 +656,9 @@ namespace asr {
         if (normalized.empty()) {
             return false;
         }
-        for (const auto& label : wake_labels_) {
-            if (normalize_wake_text(label) == normalized) {
-                return true;
-            }
-        }
+        return std::ranges::any_of(wake_labels_, [&normalized](const auto& label) {
+            return normalize_wake_text(label) == normalized;
+        });
         return false;
     }
 

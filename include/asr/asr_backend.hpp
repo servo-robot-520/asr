@@ -18,11 +18,11 @@ namespace asr {
 
     /// 后端事件；AsrNode 负责把它转换成 AsrEvent 并关联 session_id。
     struct BackendEvent {
-        BackendEventType type{BackendEventType::Final};
-        std::string text;
-        std::string language;
-        std::string error;
-        float confidence{0.0F};
+        BackendEventType type{BackendEventType::Final}; ///< 事件类型
+        std::string text; ///< 识别文本；Wake/Final 时有效
+        std::string language; ///< 识别语言；后端不提供时为空
+        std::string error; ///< 失败原因；Failed 时有效
+        float confidence{0.0F}; ///< 置信度；后端不提供时为 0
     };
 
     /// ASR 后端接口。
@@ -37,13 +37,16 @@ namespace asr {
         /// 后端名称，写入 AsrState/AsrEvent.backend。
         [[nodiscard]] virtual std::string_view name() const noexcept = 0;
 
-        /// 加载模型；失败时 error 写入英文原因。
+        /// 加载模型；失败时 error 写入原因。
+        /// @param error 失败原因；成功时保持原值
         virtual bool initialize(std::string* error) = 0;
 
         /// 模型是否已成功加载。
         [[nodiscard]] virtual bool ok() const = 0;
 
         /// 送入一块 16 kHz mono PCM，返回本次产生的事件。
+        /// @param samples 16 kHz mono float 采样
+        /// @param count 采样数
         virtual std::vector<BackendEvent> push(const float* samples, std::size_t count) = 0;
 
         /// 冲刷尾部音频；用于采集 eos 或节点停止。

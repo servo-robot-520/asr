@@ -32,13 +32,17 @@ namespace asr {
     /// 节点可以继续运行并上报错误。
     class SenseVoiceRecognizer {
     public:
+        /// 构造空识别器；模型在 initialize() 中加载。
         SenseVoiceRecognizer() = default;
+        /// 释放 sherpa-onnx 离线识别器。
         ~SenseVoiceRecognizer();
 
         SenseVoiceRecognizer(const SenseVoiceRecognizer&) = delete;
         SenseVoiceRecognizer& operator=(const SenseVoiceRecognizer&) = delete;
 
         /// 加载模型；失败时 error 写入英文原因。
+        /// @param config 模型/tokens/语言/线程配置
+        /// @param error 失败原因
         [[nodiscard]] bool initialize(const SenseVoiceConfig& config, std::string* error);
 
         /// 模型是否已成功加载。
@@ -47,11 +51,13 @@ namespace asr {
         }
 
         /// 识别一句话；samples 必须为 16 kHz mono float。
+        /// @param samples 16 kHz mono float 采样
+        /// @param count 采样数
         [[nodiscard]] std::expected<RecognitionResult, std::string>
         recognize(const float* samples, std::size_t count) const;
 
     private:
-        const SherpaOnnxOfflineRecognizer* recognizer_{nullptr};
+        const SherpaOnnxOfflineRecognizer* recognizer_{nullptr}; ///< sherpa-onnx 离线识别器句柄
     };
 
 } // namespace asr

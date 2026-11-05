@@ -13,9 +13,13 @@ namespace asr {
     class LinearResampler {
     public:
         /// input_rate == output_rate 时直接拷贝；否则按线性插值降/升采样。
+        /// @param input_rate 输入采样率
+        /// @param output_rate 输出采样率
         LinearResampler(uint32_t input_rate, uint32_t output_rate);
 
         /// 推入一块 mono float；返回本块产生的输出。
+        /// @param samples 输入采样
+        /// @param count 输入样本数
         std::vector<float> push(const float* samples, std::size_t count);
 
         /// 构造时的输入采样率，单位 Hz。

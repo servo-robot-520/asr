@@ -27,13 +27,20 @@ endif ()
 
 # 通用 ASR 库。其他功能包可以链接本库，并把外部 rclcpp::Node 传入 AsrNode。
 add_library(asr SHARED
+        include/asr/asr_backend.hpp
         include/asr/asr_node.hpp
+        include/asr/backend_factory.hpp
+        include/asr/keyword_backend.hpp
         include/asr/linear_resampler.hpp
         include/asr/path_utils.hpp
+        include/asr/sense_voice_backend.hpp
         include/asr/sense_voice_recognizer.hpp
         include/asr/vad_segmenter.hpp
         src/asr_node.cpp
+        src/backend_factory.cpp
+        src/keyword_backend.cpp
         src/linear_resampler.cpp
+        src/sense_voice_backend.cpp
         src/sense_voice_recognizer.cpp
         src/vad_segmenter.cpp
 )
@@ -108,6 +115,9 @@ if (BUILD_TESTING)
 
     ament_add_gtest(test_asr_vad_segmenter test/test_vad_segmenter.cpp)
     target_link_libraries(test_asr_vad_segmenter asr SherpaOnnx::c-api)
+
+    ament_add_gtest(test_asr_keyword_backend test/test_keyword_backend.cpp)
+    target_link_libraries(test_asr_keyword_backend asr SherpaOnnx::c-api)
 endif ()
 
 install(TARGETS asr

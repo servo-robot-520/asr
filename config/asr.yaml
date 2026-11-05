@@ -5,6 +5,9 @@
       log_path: ./log
       async: false
 
+    # 后端选择：sense_voice（VAD + 离线识别）或 keyword（流式关键词）。
+    backend: sense_voice
+
     # audio_io 的节点名与 capture/event 话题由 audio_io_interface 的
     # kDefaultNodeFqn/topic_capture/topic_event 统一生成，并自动加上
     # asr 当前 namespace；这里不需要配置节点名或采集话题。
@@ -36,12 +39,27 @@
       provider: cpu
       debug: false
 
-    # SenseVoice 离线识别模型。
+    # SenseVoice 离线识别模型；backend=sense_voice 时使用。
     recognizer:
       model: /opt/sherpa-onnx/models/sense-voice/model.int8.onnx
       tokens: /opt/sherpa-onnx/models/sense-voice/tokens.txt
       language: auto
       use_itn: true
+      num_threads: 1
+      provider: cpu
+      debug: false
+
+    # sherpa-onnx KWS 模型；backend=keyword 时使用。
+    keyword:
+      encoder: /opt/sherpa-onnx/models/kws/encoder-epoch-13-avg-2-chunk-16-left-64.int8.onnx
+      decoder: /opt/sherpa-onnx/models/kws/decoder-epoch-13-avg-2-chunk-16-left-64.onnx
+      joiner: /opt/sherpa-onnx/models/kws/joiner-epoch-13-avg-2-chunk-16-left-64.int8.onnx
+      tokens: /opt/sherpa-onnx/models/kws/tokens.txt
+      keywords_file: /opt/sherpa-onnx/models/kws/keywords.txt
+      max_active_paths: 4
+      num_trailing_blanks: 1
+      keywords_score: 1.0
+      keywords_threshold: 0.25
       num_threads: 1
       provider: cpu
       debug: false

@@ -2,31 +2,67 @@
 
 ## 简介
 
-`asr` 是通用的 ROS 2 离线语音识别功能包：
+`asr` 是通用的 ROS 2 语音识别功能包，识别后端由参数选择，AsrNode 本身不绑定具体模型：
 
 ```text
-/audio_io/capture → 下混/重采样 16 kHz → silero VAD → SenseVoice → /asr/event
+/audio_io/capture → 下混/重采样 16 kHz → AsrBackend → /asr/event
 ```
 
-本包不包含唤醒词、鸭子口令语义、电量查询或 TTS；这些属于上层业务包（例如 `duck_asr`）。
-当前实现使用 **sherpa-onnx + SenseVoice（离线）**，没有唤醒词：VAD 检测到语音后直接识别，
-因此适合“按键触发/上层已经决定开始收音”的场景。固定口令建议由上层用 VAD 句段加文本匹配实现，
-后续可在本包增加 KWS 唤醒词阶段。
+内置后端：
+
+| `backend` | 处理方式 | 适用 |
+| --- | --- | --- |
+| `sense_voice` | silero VAD 切句 + SenseVoice 离线识别 | 需要完整转写 |
+| `keyword` | sherpa-onnx KWS 流式关键词，无 VAD/SenseVoice | 只需召唤词/固定关键词，模型更小 |
+
+本包不包含鸭子口令语义、电量查询或 TTS；这些属于上层业务包（例如 `duck_asr`）。
 
 本包提供两个 target：
 
 | target | 类型 | 作用 |
 | --- | --- | --- |
-| `asr` | 共享库 `libasr.so` | 组合式 `AsrNode`、SenseVoice、silero VAD、重采样、采集队列 |
+| `asr` | 共享库 `libasr.so` | 组合式 `AsrNode`、后端接口/工厂、重采样、采集队列 |
 | `asr_node` | 可执行文件 | 只做 `main()`、执行器和 common_cpp 日志桥接 |
 
 ### 核心设计
 
 - **组合式节点**：`asr::AsrNode` 不继承 `rclcpp::Node`，构造函数接收外部 `Node::SharedPtr`，其他功能包可以把它嵌入自己的进程。
+- **后端可替换**：`AsrNode` 只依赖 `AsrBackend` 接口；`sense_voice`/`keyword` 只是工厂里的实现，新增后端不需要改节点。
 - **麦克风唯一所有者仍是 `audio_io`**：本包只订阅 `AudioStream`，不打开 ALSA。
-- **回调不做推理**：采集回调只校验、拷贝并入有界队列；VAD 和 SenseVoice 在独立工作线程串行执行。
+- **回调不做推理**：采集回调只校验、拷贝并入有界队列；VAD/识别在独立工作线程串行执行。
 - **播放门控**：订阅 `audio_io` 的播放事件，机器人自己说话时暂停识别，避免 TTS/叫声自触发。
 - **失败不退出**：模型缺失、格式错误或识别失败只上报 `AsrState.last_error` / `AsrEvent.error`，节点继续运行。
+
+## 后端
+
+`config/asr.yaml`：
+
+```yaml
+backend: sense_voice   # 或 keyword
+```
+
+后端接口在 `include/asr/asr_backend.hpp`：
+
+```cpp
+class AsrBackend {
+    virtual std::string_view name() const noexcept = 0;
+    virtual bool initialize(std::string* error) = 0;
+    virtual bool ok() const = 0;
+    virtual std::vector<BackendEvent> push(const float* samples, std::size_t count) = 0;
+    virtual std::vector<BackendEvent> flush() = 0;
+    virtual void reset() = 0;
+};
+```
+
+新增后端：
+
+1. 实现 `AsrBackend`，自行决定 VAD/流式/模型；
+2. 在 `src/backend_factory.cpp` 增加 backend 分支和参数读取；
+3. 在 `config/asr.yaml` 增加对应参数；
+4. `backend: <name>` 切换。
+
+`sense_voice` 事件顺序为 `EVENT_SPEECH_START` → `EVENT_ENDPOINT` → `EVENT_FINAL`；
+`keyword` 只发 `EVENT_FINAL`（命中关键词），AsrNode 会为它生成 `EVENT_SPEECH_START` 会话。
 
 ## 接口
 
@@ -108,6 +144,23 @@ sudo wget -O /opt/sherpa-onnx/models/silero_vad.onnx \
   https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
 ```
 
+### 4. 下载关键词模型（`backend: keyword`，可选）
+
+```bash
+cd /tmp
+wget https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20.tar.bz2
+sudo tar -xjf sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20.tar.bz2 \
+  -C /opt/sherpa-onnx/models
+sudo mv /opt/sherpa-onnx/models/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20 \
+  /opt/sherpa-onnx/models/kws
+sudo cp /opt/sherpa-onnx/models/kws/test_wavs/keywords.txt \
+  /opt/sherpa-onnx/models/kws/keywords.txt
+```
+
+`keywords.txt` 是 `text2token` 生成的关键词文件；先把要识别的原始词写入
+`keywords_raw.txt`，再按 sherpa-onnx 文档用 `sherpa-onnx-cli text2token` 生成。
+模型自带的 `test_wavs/keywords.txt` 可直接用于联调。
+
 ## 构建
 
 ```bash
@@ -187,6 +240,7 @@ audio_io 事件 = audio_io_interface::topic_event(kDefaultNodeFqn, asr 的 names
 
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |
+| `backend` | `sense_voice` | `sense_voice` / `keyword` |
 | `capture.stream_id` | `mic` | 只接受该 `stream_id`；空 = 任意 |
 | `gate.enabled` | `true` | 播放时暂停识别 |
 | `gate.holdoff_ms` | `300` | 播放结束后的静音保持 |
@@ -202,6 +256,16 @@ audio_io 事件 = audio_io_interface::topic_event(kDefaultNodeFqn, asr 的 names
 | `recognizer.language` | `auto` | `auto` / `zh` / `en` / `ja` / `ko` / `yue` |
 | `recognizer.use_itn` | `true` | 逆文本归一化 |
 | `recognizer.num_threads` | `1` | ONNX Runtime 线程数 |
+| `keyword.encoder` | `/opt/sherpa-onnx/models/kws/encoder-...int8.onnx` | KWS encoder |
+| `keyword.decoder` | `/opt/sherpa-onnx/models/kws/decoder-....onnx` | KWS decoder |
+| `keyword.joiner` | `/opt/sherpa-onnx/models/kws/joiner-...int8.onnx` | KWS joiner |
+| `keyword.tokens` | `/opt/sherpa-onnx/models/kws/tokens.txt` | KWS tokens |
+| `keyword.keywords_file` | `/opt/sherpa-onnx/models/kws/keywords.txt` | text2token 生成的关键词文件 |
+| `keyword.max_active_paths` | `4` | KWS 搜索路径数 |
+| `keyword.num_trailing_blanks` | `1` | 触发前尾随 blank 数 |
+| `keyword.keywords_score` | `1.0` | 关键词加分 |
+| `keyword.keywords_threshold` | `0.25` | 检测阈值 |
+| `keyword.num_threads` | `1` | ONNX Runtime 线程数 |
 | `state.period_ms` | `500` | `AsrState` 发布周期 |
 | `frame_id` | `mic` | 事件 header |
 
@@ -242,6 +306,19 @@ export ASR_EXPECT_TEXT=时间
 colcon test --packages-select asr
 ```
 
+关键词后端测试：
+
+```bash
+export ASR_KWS_ENCODER=/opt/sherpa-onnx/models/kws/encoder-...int8.onnx
+export ASR_KWS_DECODER=/opt/sherpa-onnx/models/kws/decoder-....onnx
+export ASR_KWS_JOINER=/opt/sherpa-onnx/models/kws/joiner-...int8.onnx
+export ASR_KWS_TOKENS=/opt/sherpa-onnx/models/kws/tokens.txt
+export ASR_KWS_KEYWORDS=/opt/sherpa-onnx/models/kws/keywords.txt
+export ASR_KWS_TEST_WAV=/opt/sherpa-onnx/models/kws/test_wavs/zh_3.wav
+export ASR_KWS_EXPECT=文森特卡索
+colcon test --packages-select asr
+```
+
 `tools/replay_capture.py` 用于端到端验证：
 
 ```text
@@ -261,9 +338,10 @@ colcon test --packages-select asr
 
 ## 已知限制
 
-- 当前没有唤醒词/KWS，VAD 检测到语音就会识别；需要“召唤词”时应在后续增加 KWS 阶段或由上层按键触发。
+- `sense_voice` 没有唤醒词：VAD 检测到语音就会转写；`keyword` 后端就是轻量 KWS，适合固定词。
 - SenseVoice 是离线模型，不支持流式 partial；`EVENT_PARTIAL` 当前不会发布。
-- 一次只处理一个句段，识别期间新音频进入有界队列；长句/慢模型可能导致丢帧。
+- `keyword` 只输出命中的关键词，不是任意文本转写；关键词文件需要预先 text2token。
+- 一次只处理一个句段/关键词流，识别期间新音频进入有界队列；长句/慢模型可能导致丢帧。
 - 模型文件不随包分发，需按上面的步骤下载；使用前请确认模型和 sherpa-onnx 的上游许可证。
 
 设计背景：[`docs/duck-ros2-asr-architecture.zh-CN.md`](../../docs/duck-ros2-asr-architecture.zh-CN.md)。

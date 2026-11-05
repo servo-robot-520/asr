@@ -7,6 +7,7 @@
 #include <string_view>
 #include <utility>
 
+#include "asr/backend_factory.hpp"
 #include "asr_interface/ros_msg.hpp"
 #include "audio_io_interface/ros_msg.hpp"
 #include "common_cpp/logging/log_interface/log_macro.hpp"
@@ -15,7 +16,6 @@ namespace asr {
 
     namespace {
 
-        constexpr std::string_view kBackendName = "sherpa_onnx_sense_voice";
         constexpr uint32_t kTargetSampleRate = 16000;
 
         /// 返回单调时钟当前时间；用于播放门控的 holdoff/max 计时。
@@ -55,45 +55,25 @@ namespace asr {
     }
 
     void AsrNode::initialize_backends() {
-        SenseVoiceConfig recognizer_config;
-        recognizer_config.model = declare_or_get<std::string>("recognizer.model", "");
-        recognizer_config.tokens = declare_or_get<std::string>("recognizer.tokens", "");
-        recognizer_config.language = declare_or_get<std::string>("recognizer.language", "auto");
-        recognizer_config.use_itn = declare_or_get<bool>("recognizer.use_itn", true);
-        recognizer_config.num_threads = std::max(1, declare_or_get<int>("recognizer.num_threads", 1));
-        recognizer_config.provider = declare_or_get<std::string>("recognizer.provider", "cpu");
-        recognizer_config.debug = declare_or_get<bool>("recognizer.debug", false);
-
-        VadConfig vad_config;
-        vad_config.model = declare_or_get<std::string>("vad.model", "");
-        vad_config.threshold = declare_or_get<float>("vad.threshold", 0.25F);
-        vad_config.min_silence_duration = declare_or_get<float>("vad.min_silence_duration", 0.5F);
-        vad_config.min_speech_duration = declare_or_get<float>("vad.min_speech_duration", 0.25F);
-        vad_config.max_speech_duration = declare_or_get<float>("vad.max_speech_duration", 10.0F);
-        vad_config.window_size = std::max(1, declare_or_get<int>("vad.window_size", 512));
-        vad_config.buffer_seconds = declare_or_get<float>("vad.buffer_seconds", 30.0F);
-        vad_config.num_threads = std::max(1, declare_or_get<int>("vad.num_threads", 1));
-        vad_config.provider = declare_or_get<std::string>("vad.provider", "cpu");
-        vad_config.debug = declare_or_get<bool>("vad.debug", false);
+        backend_type_ = declare_or_get<std::string>("backend", "sense_voice");
 
         std::string error;
-        if (!recognizer_.initialize(recognizer_config, &error)) {
-            set_last_error("recognizer: " + error);
-            LOG_ERROR("ASR recognizer unavailable: {}", error);
-        }
-        if (!vad_.initialize(vad_config, &error)) {
-            if (!last_error_.empty()) {
-                set_last_error(last_error_ + "; vad: " + error);
-            }
-            else {
-                set_last_error("vad: " + error);
-            }
-            LOG_ERROR("ASR VAD unavailable: {}", error);
+        backend_ = create_backend(backend_type_, *node_, &error);
+        if (!backend_) {
+            set_last_error(error);
+            LOG_ERROR("ASR backend creation failed: {}", error);
+            model_loaded_ = false;
+            return;
         }
 
-        model_loaded_ = recognizer_.ok() && vad_.ok();
-        LOG_INFO("ASR backends: recognizer={} vad={} model_loaded={}",
-                 recognizer_.ok(), vad_.ok(), model_loaded_.load());
+        if (!backend_->initialize(&error)) {
+            set_last_error(backend_type_ + ": " + error);
+            LOG_ERROR("ASR backend '{}' unavailable: {}", backend_type_, error);
+        }
+
+        model_loaded_ = backend_->ok();
+        LOG_INFO("ASR backend: type={} name={} model_loaded={}",
+                 backend_type_, backend_->name(), model_loaded_.load());
     }
 
     void AsrNode::create_interfaces() {
@@ -321,8 +301,9 @@ namespace asr {
             }
 
             if (reset_requested_.exchange(false)) {
-                vad_.reset();
-                speech_active_ = false;
+                if (backend_) {
+                    backend_->reset();
+                }
             }
 
             try {
@@ -372,12 +353,11 @@ namespace asr {
     }
 
     void AsrNode::process_chunk(const CaptureChunk& chunk) {
+        if (!backend_) {
+            return;
+        }
         if (chunk.eos) {
-            vad_.flush();
-            if (!speech_active_ && !vad_.empty()) {
-                begin_session();
-            }
-            drain_segments();
+            handle_backend_events(backend_->flush());
             return;
         }
         if (gated_.load() || !model_loaded_.load()) {
@@ -389,63 +369,63 @@ namespace asr {
             return;
         }
 
-        vad_.accept(samples.data(), samples.size());
-        if (!speech_active_ && (vad_.detected() || !vad_.empty())) {
-            begin_session();
-        }
-        drain_segments();
+        handle_backend_events(backend_->push(samples.data(), samples.size()));
     }
 
-    void AsrNode::drain_segments() {
-        while (!vad_.empty()) {
-            auto segment = vad_.pop();
-            if (!segment.has_value()) {
-                break;
-            }
+    void AsrNode::handle_backend_events(const std::vector<BackendEvent>& events) {
+        for (const auto& event : events) {
             if (gated_.load() || reset_requested_.load()) {
                 end_session();
                 continue;
             }
-            if (!session_active_.load()) {
-                begin_session();
-            }
 
-            publish_event(asr_interface::msg::AsrEvent::EVENT_ENDPOINT, "", "", "");
-            const auto result = recognizer_.recognize(segment->samples.data(), segment->samples.size());
-
-            if (gated_.load() || reset_requested_.load() || !session_active_.load()) {
+            switch (event.type) {
+            case BackendEventType::SpeechStart:
+                if (!session_active_.load()) {
+                    begin_session();
+                }
+                break;
+            case BackendEventType::Endpoint:
+                if (session_active_.load()) {
+                    publish_event(asr_interface::msg::AsrEvent::EVENT_ENDPOINT, "", "", "");
+                }
+                break;
+            case BackendEventType::Partial:
+                if (session_active_.load()) {
+                    publish_event(asr_interface::msg::AsrEvent::EVENT_PARTIAL,
+                                  event.text, event.language, "");
+                }
+                break;
+            case BackendEventType::Final:
+                if (!session_active_.load()) {
+                    begin_session();
+                }
+                set_last_error("");
+                {
+                    std::string session_id;
+                    {
+                        std::lock_guard lock(state_mutex_);
+                        session_id = current_session_id_;
+                    }
+                    LOG_INFO("ASR final: session={} backend={} text={}",
+                             session_id, backend_type_, event.text);
+                }
+                publish_event(asr_interface::msg::AsrEvent::EVENT_FINAL,
+                              event.text, event.language, "");
                 end_session();
-                continue;
-            }
-            if (!result.has_value()) {
-                set_last_error(result.error());
-                LOG_ERROR("ASR recognition failed: {}", result.error());
-                publish_event(asr_interface::msg::AsrEvent::EVENT_FAILED, "", "", result.error());
+                break;
+            case BackendEventType::Failed:
+                set_last_error(event.error);
+                LOG_ERROR("ASR backend failed: {}", event.error);
+                publish_event(asr_interface::msg::AsrEvent::EVENT_FAILED,
+                              "", "", event.error);
                 end_session();
-                continue;
+                break;
             }
-
-            if (result->text.empty()) {
-                LOG_DEBUG("ASR segment produced empty text");
-                end_session();
-                continue;
-            }
-
-            set_last_error("");
-            std::string session_id;
-            {
-                std::lock_guard lock(state_mutex_);
-                session_id = current_session_id_;
-            }
-            LOG_INFO("ASR final: session={} text={}", session_id, result->text);
-            publish_event(asr_interface::msg::AsrEvent::EVENT_FINAL,
-                          result->text, result->language, "");
-            end_session();
         }
     }
 
     void AsrNode::begin_session() {
-        speech_active_ = true;
         session_active_ = true;
         {
             std::lock_guard lock(state_mutex_);
@@ -455,7 +435,6 @@ namespace asr {
     }
 
     void AsrNode::end_session() {
-        speech_active_ = false;
         session_active_ = false;
         std::lock_guard lock(state_mutex_);
         current_session_id_.clear();
@@ -469,7 +448,7 @@ namespace asr {
         message.event = event;
         message.text = text;
         message.language = language;
-        message.backend = kBackendName;
+        message.backend = backend_ ? std::string{backend_->name()} : backend_type_;
         message.error = error;
         message.confidence = 0.0F;
         {
@@ -483,7 +462,7 @@ namespace asr {
         asr_interface::msg::AsrState message;
         message.header.stamp = node_->now();
         message.header.frame_id = frame_id_;
-        message.backend = kBackendName;
+        message.backend = backend_ ? std::string{backend_->name()} : backend_type_;
         message.model_loaded = model_loaded_.load();
         message.mode = "free_asr";
         message.enabled = true;

@@ -16,9 +16,8 @@
 #include <rclcpp/rclcpp.hpp>
 #include <std_msgs/msg/header.hpp>
 
+#include "asr/asr_backend.hpp"
 #include "asr/linear_resampler.hpp"
-#include "asr/sense_voice_recognizer.hpp"
-#include "asr/vad_segmenter.hpp"
 #include "asr_interface/msg/asr_event.hpp"
 #include "asr_interface/msg/asr_state.hpp"
 #include "audio_io_interface/msg/audio_event.hpp"
@@ -38,8 +37,8 @@ namespace asr {
     /// @endcode
     ///
     /// 数据流：
-    /// /audio_io/capture → 下混/重采样 16 kHz → silero VAD → SenseVoice →
-    /// AsrEvent。模型缺失时节点保持运行，只在 AsrState 中报告错误。
+    /// /audio_io/capture → 下混/重采样 16 kHz → AsrBackend → AsrEvent。
+    /// 具体后端由 `backend` 参数选择；模型缺失时节点保持运行，只在 AsrState 中报告错误。
     class AsrNode {
     public:
         explicit AsrNode(rclcpp::Node::SharedPtr node);
@@ -80,7 +79,7 @@ namespace asr {
 
         void worker_loop();
         void process_chunk(const CaptureChunk& chunk);
-        void drain_segments();
+        void handle_backend_events(const std::vector<BackendEvent>& events);
         void begin_session();
         void end_session();
         void request_reset();
@@ -109,11 +108,11 @@ namespace asr {
         rclcpp::Publisher<asr_interface::msg::AsrState>::SharedPtr state_publisher_;
         rclcpp::TimerBase::SharedPtr state_timer_;
 
-        SenseVoiceRecognizer recognizer_;
-        VadSegmenter vad_;
         std::unique_ptr<LinearResampler> resampler_;
         uint32_t resampler_input_rate_{0};
 
+        std::string backend_type_;
+        std::unique_ptr<AsrBackend> backend_;
         std::string capture_topic_;
         std::string stream_id_;
         std::string frame_id_;
@@ -144,7 +143,6 @@ namespace asr {
         std::string last_error_;
         uint64_t session_counter_{0};
 
-        bool speech_active_{false};
         bool sequence_valid_{false};
         uint64_t expected_sequence_{0};
 

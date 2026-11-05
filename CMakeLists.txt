@@ -22,7 +22,12 @@ find_package(SherpaOnnx REQUIRED)
 # 通用 ASR 库。其他功能包可以链接本库，并把外部 rclcpp::Node 传入 AsrNode。
 add_library(asr SHARED
         include/asr/linear_resampler.hpp
+        include/asr/path_utils.hpp
+        include/asr/sense_voice_recognizer.hpp
+        include/asr/vad_segmenter.hpp
         src/linear_resampler.cpp
+        src/sense_voice_recognizer.cpp
+        src/vad_segmenter.cpp
 )
 target_compile_features(asr PUBLIC cxx_std_23)
 set_target_properties(asr PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -31,11 +36,18 @@ target_include_directories(asr PUBLIC
         $<INSTALL_INTERFACE:include>
 )
 ament_target_dependencies(asr PUBLIC rclcpp std_msgs)
+target_link_libraries(asr PRIVATE SherpaOnnx::c-api)
 
 if (BUILD_TESTING)
     find_package(ament_cmake_gtest REQUIRED)
     ament_add_gtest(test_linear_resampler test/test_linear_resampler.cpp)
     target_link_libraries(test_linear_resampler asr)
+
+    ament_add_gtest(test_sense_voice_recognizer test/test_sense_voice_recognizer.cpp)
+    target_link_libraries(test_sense_voice_recognizer asr SherpaOnnx::c-api)
+
+    ament_add_gtest(test_vad_segmenter test/test_vad_segmenter.cpp)
+    target_link_libraries(test_vad_segmenter asr SherpaOnnx::c-api)
 endif ()
 
 install(TARGETS asr

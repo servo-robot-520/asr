@@ -391,6 +391,5 @@ colcon test --packages-select asr
 - 一次只处理一个句段/关键词流，识别期间新音频进入有界队列；长句/慢模型可能导致丢帧。
 - 模型文件不随包分发，需按上面的步骤下载；使用前请确认模型和 sherpa-onnx 的上游许可证。
 
-设计背景：[`docs/duck-ros2-asr-architecture.zh-CN.md`](../../docs/duck-ros2-asr-architecture.zh-CN.md)。
 本包设计与架构：[`docs/asr-architecture.zh-CN.md`](docs/asr-architecture.zh-CN.md)。
-接口定义：[`src/asr_interface`](../asr_interface)。
+KWS 模型文件格式：[`docs/kws-model-files.zh-CN.md`](docs/kws-model-files.zh-CN.md)。

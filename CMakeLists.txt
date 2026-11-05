@@ -38,7 +38,14 @@ add_library(asr SHARED
         src/vad_segmenter.cpp
 )
 target_compile_features(asr PUBLIC cxx_std_23)
-set_target_properties(asr PROPERTIES POSITION_INDEPENDENT_CODE ON)
+get_filename_component(SherpaOnnx_LIBRARY_DIR "${SherpaOnnx_C_API_LIBRARY}" DIRECTORY)
+# 预编译 sherpa-onnx 不带 CMake config；把实际库目录写入 RPATH，避免
+# 每次运行都必须手工设置 LD_LIBRARY_PATH。部署环境不同可用 LD_LIBRARY_PATH 覆盖。
+set_target_properties(asr PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        BUILD_RPATH "${SherpaOnnx_LIBRARY_DIR}"
+        INSTALL_RPATH "${SherpaOnnx_LIBRARY_DIR}"
+)
 target_include_directories(asr PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
@@ -74,6 +81,10 @@ if (BUILD_EXE)
     target_compile_features(asr_node PRIVATE cxx_std_23)
     target_link_libraries(asr_node asr)
     ament_target_dependencies(asr_node rclcpp)
+    set_target_properties(asr_node PROPERTIES
+            BUILD_RPATH "${SherpaOnnx_LIBRARY_DIR}"
+            INSTALL_RPATH "$ORIGIN/..;${SherpaOnnx_LIBRARY_DIR}"
+    )
 
     # rcutils 输出处理器是进程全局对象，只能由 main.cpp 安装。
     if (ROS2_WS_SOURCE_BUILD)
@@ -108,6 +119,10 @@ install(TARGETS asr
 )
 install(DIRECTORY include/
         DESTINATION include
+)
+
+install(FILES README.md
+        DESTINATION share/${PROJECT_NAME}
 )
 
 if (BUILD_EXE)

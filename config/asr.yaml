@@ -1,17 +1,17 @@
 /**:
   ros__parameters:
-    # 日志由 common_cpp 的 RclcppLogHandler 读取；日志文本使用英文。
     log:
       log_level: info
       log_path: ./log
       async: false
 
-    # audio_io 采集话题；默认与 audio_io_interface 的 helper 一致。
+    # audio_io 名称默认是相对名；与 asr 同 namespace 时自动解析为
+    # /<namespace>/audio_io，不需要手工补 namespace。
+    # capture.topic 不填时自动使用 <audio_io.node>/capture。
     capture:
-      topic: /audio_io/capture
       stream_id: mic
     audio_io:
-      node: /audio_io
+      node: audio_io
 
     # 播放门控：机器人自己说话时不接收麦克风，避免自触发。
     gate:

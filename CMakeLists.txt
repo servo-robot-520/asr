@@ -30,6 +30,7 @@ add_library(asr SHARED
         include/asr/asr_node.hpp
         include/asr/linear_resampler.hpp
         include/asr/path_utils.hpp
+        include/asr/ros_names.hpp
         include/asr/sense_voice_recognizer.hpp
         include/asr/vad_segmenter.hpp
         src/asr_node.cpp
@@ -102,6 +103,9 @@ if (BUILD_TESTING)
     find_package(ament_cmake_gtest REQUIRED)
     ament_add_gtest(test_asr_linear_resampler test/test_linear_resampler.cpp)
     target_link_libraries(test_asr_linear_resampler asr)
+
+    ament_add_gtest(test_asr_ros_names test/test_ros_names.cpp)
+    target_link_libraries(test_asr_ros_names asr)
 
     ament_add_gtest(test_asr_sense_voice_recognizer test/test_sense_voice_recognizer.cpp)
     target_link_libraries(test_asr_sense_voice_recognizer asr SherpaOnnx::c-api)

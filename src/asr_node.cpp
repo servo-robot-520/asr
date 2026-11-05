@@ -7,6 +7,7 @@
 #include <string_view>
 #include <utility>
 
+#include "asr/ros_names.hpp"
 #include "audio_io_interface/ros_msg.hpp"
 #include "common_cpp/logging/log_interface/log_macro.hpp"
 
@@ -39,9 +40,15 @@ namespace asr {
     }
 
     void AsrNode::declare_parameters() {
-        capture_topic_ = declare_or_get<std::string>("capture.topic", audio_io_interface::topic_capture());
+        // audio_io.node 默认是相对名；同一 namespace 下 asr 和 audio_io 会自动
+        // 解析到 /<ns>/audio_io，不需要在配置文件里重复 namespace。
+        const auto configured_audio_io = declare_or_get<std::string>("audio_io.node", "audio_io");
+        audio_io_node_ = resolve_node_fqn(node_->get_namespace(), configured_audio_io);
+        const auto configured_capture = declare_or_get<std::string>("capture.topic", "");
+        capture_topic_ = resolve_topic_name(
+            node_->get_namespace(),
+            configured_capture.empty() ? audio_io_node_ + "/capture" : configured_capture);
         stream_id_ = declare_or_get<std::string>("capture.stream_id", "mic");
-        audio_io_node_ = declare_or_get<std::string>("audio_io.node", std::string{audio_io_interface::kDefaultNodeFqn});
         frame_id_ = declare_or_get<std::string>("frame_id", "mic");
 
         gate_enabled_ = declare_or_get<bool>("gate.enabled", true);

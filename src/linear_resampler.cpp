@@ -39,8 +39,8 @@ namespace asr {
             cursor_ += ratio_;
         }
 
-        const auto consumed = std::min<std::size_t>(static_cast<std::size_t>(cursor_), buffer_.size() - 1);
-        if (consumed > 0) {
+        if (const auto consumed = std::min<std::size_t>(static_cast<std::size_t>(cursor_), buffer_.size() - 1);
+            consumed > 0) {
             buffer_.erase(buffer_.begin(), buffer_.begin() + static_cast<std::ptrdiff_t>(consumed));
             cursor_ -= static_cast<double>(consumed);
         }

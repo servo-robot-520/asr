@@ -4,8 +4,8 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include "asr/asr_node.hpp"
-#include "common_cpp/logging/log_interface/log_macro.hpp"
 #include "common_cpp/logging/rclcpp_log_handler.hpp"
+#include "common_cpp/logging/log_interface/log_macro.hpp"
 
 int main(const int argc, char** argv) {
     rclcpp::init(argc, argv);

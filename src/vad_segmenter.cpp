@@ -93,7 +93,7 @@ namespace asr {
         return vad_ == nullptr || SherpaOnnxVoiceActivityDetectorEmpty(vad_) != 0;
     }
 
-    std::optional<VadSegment> VadSegmenter::pop() {
+    std::optional<VadSegment> VadSegmenter::pop() const {
         if (vad_ == nullptr || empty()) {
             return std::nullopt;
         }

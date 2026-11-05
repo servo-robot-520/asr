@@ -153,7 +153,7 @@ namespace asr {
         LOG_INFO("ASR node stopped");
     }
 
-    std::size_t AsrNode::bytes_per_sample(const std::string& encoding) const {
+    std::size_t AsrNode::bytes_per_sample(const std::string& encoding) {
         if (encoding == "s16le") {
             return 2;
         }
@@ -304,8 +304,7 @@ namespace asr {
             queue_.clear();
             queued_ms_ = 0.0;
         }
-        const bool was_active = session_active_.exchange(false);
-        if (was_active) {
+        if (session_active_.exchange(false)) {
             publish_event(asr_interface::msg::AsrEvent::EVENT_CANCELED, "", "", "");
         }
     }
@@ -472,7 +471,7 @@ namespace asr {
     }
 
     void AsrNode::publish_event(const uint8_t event, const std::string& text,
-                                const std::string& language, const std::string& error) {
+                                const std::string& language, const std::string& error) const {
         asr_interface::msg::AsrEvent message;
         message.header.stamp = node_->now();
         message.header.frame_id = frame_id_;
@@ -489,7 +488,7 @@ namespace asr {
         event_publisher_->publish(message);
     }
 
-    void AsrNode::publish_state() {
+    void AsrNode::publish_state() const {
         asr_interface::msg::AsrState message;
         message.header.stamp = node_->now();
         message.header.frame_id = frame_id_;

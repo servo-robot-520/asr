@@ -60,7 +60,7 @@ namespace asr {
         [[nodiscard]] bool empty() const;
 
         /// 取出最早的完整语音段；没有时返回空。
-        [[nodiscard]] std::optional<VadSegment> pop();
+        [[nodiscard]] std::optional<VadSegment> pop() const;
 
         /// 冲刷尾部并强制结束当前段；用于采集 eos 或节点停止。
         void flush();

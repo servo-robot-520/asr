@@ -86,13 +86,13 @@ namespace asr {
         void request_reset();
 
         void update_gate();
-        void publish_state();
+        void publish_state() const;
         void publish_event(uint8_t event, const std::string& text,
-                           const std::string& language, const std::string& error);
+                           const std::string& language, const std::string& error) const;
         void set_last_error(std::string error);
 
         [[nodiscard]] std::vector<float> to_16k_mono(const CaptureChunk& chunk);
-        [[nodiscard]] std::size_t bytes_per_sample(const std::string& encoding) const;
+        [[nodiscard]] static std::size_t bytes_per_sample(const std::string& encoding);
 
         template <typename T>
         T declare_or_get(const std::string& name, const T& default_value) {

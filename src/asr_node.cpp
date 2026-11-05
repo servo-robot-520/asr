@@ -293,8 +293,6 @@ namespace asr {
         if (was_active) {
             publish_event(asr_interface::msg::AsrEvent::EVENT_CANCELED, "", "", "");
         }
-        std::lock_guard lock(state_mutex_);
-        current_session_id_.clear();
     }
 
     void AsrNode::worker_loop() {
@@ -367,6 +365,9 @@ namespace asr {
     void AsrNode::process_chunk(const CaptureChunk& chunk) {
         if (chunk.eos) {
             vad_.flush();
+            if (!speech_active_ && !vad_.empty()) {
+                begin_session();
+            }
             drain_segments();
             return;
         }
@@ -380,7 +381,7 @@ namespace asr {
         }
 
         vad_.accept(samples.data(), samples.size());
-        if (!speech_active_ && vad_.detected()) {
+        if (!speech_active_ && (vad_.detected() || !vad_.empty())) {
             begin_session();
         }
         drain_segments();
@@ -396,11 +397,14 @@ namespace asr {
                 end_session();
                 continue;
             }
+            if (!session_active_.load()) {
+                begin_session();
+            }
 
             publish_event(asr_interface::msg::AsrEvent::EVENT_ENDPOINT, "", "", "");
             const auto result = recognizer_.recognize(segment->samples.data(), segment->samples.size());
 
-            if (gated_.load() || reset_requested_.load()) {
+            if (gated_.load() || reset_requested_.load() || !session_active_.load()) {
                 end_session();
                 continue;
             }

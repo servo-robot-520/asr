@@ -11,6 +11,9 @@
 
     <depend>rclcpp</depend>
     <depend>std_msgs</depend>
+    <depend>audio_io_interface</depend>
+    <depend>asr_interface</depend>
+    <depend>common_cpp</depend>
 
     <exec_depend>rosidl_default_runtime</exec_depend>
 

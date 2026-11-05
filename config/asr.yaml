@@ -1,0 +1,52 @@
+/**:
+  ros__parameters:
+    # 日志由 common_cpp 的 RclcppLogHandler 读取；日志文本使用英文。
+    log:
+      log_level: info
+      log_path: ./log
+      async: false
+
+    # audio_io 采集话题；默认与 audio_io_interface 的 helper 一致。
+    capture:
+      topic: /audio_io/capture
+      stream_id: mic
+    audio_io:
+      node: /audio_io
+
+    # 播放门控：机器人自己说话时不接收麦克风，避免自触发。
+    gate:
+      enabled: true
+      holdoff_ms: 300
+      max_ms: 15000
+
+    # 采集回调到工作线程的有界队列；超过后丢弃最旧数据。
+    queue:
+      max_ms: 2000
+
+    state:
+      period_ms: 500
+
+    # silero VAD，从 sherpa-onnx 模型页下载 silero_vad.onnx。
+    vad:
+      model: /opt/sherpa-onnx/models/silero_vad.onnx
+      threshold: 0.25
+      min_silence_duration: 0.5
+      min_speech_duration: 0.25
+      max_speech_duration: 10.0
+      window_size: 512
+      buffer_seconds: 30.0
+      num_threads: 1
+      provider: cpu
+      debug: false
+
+    # SenseVoice 离线识别模型。
+    recognizer:
+      model: /opt/sherpa-onnx/models/sense-voice/model.int8.onnx
+      tokens: /opt/sherpa-onnx/models/sense-voice/tokens.txt
+      language: auto
+      use_itn: true
+      num_threads: 1
+      provider: cpu
+      debug: false
+
+    frame_id: mic

@@ -31,14 +31,17 @@ add_library(asr SHARED
         include/asr/asr_node.hpp
         include/asr/backend_factory.hpp
         include/asr/keyword_backend.hpp
+        include/asr/keyword_wake_detector.hpp
         include/asr/linear_resampler.hpp
         include/asr/path_utils.hpp
         include/asr/sense_voice_backend.hpp
         include/asr/sense_voice_recognizer.hpp
         include/asr/vad_segmenter.hpp
+        include/asr/wake_word_detector.hpp
         src/asr_node.cpp
         src/backend_factory.cpp
         src/keyword_backend.cpp
+        src/keyword_wake_detector.cpp
         src/linear_resampler.cpp
         src/sense_voice_backend.cpp
         src/sense_voice_recognizer.cpp
@@ -118,6 +121,9 @@ if (BUILD_TESTING)
 
     ament_add_gtest(test_asr_keyword_backend test/test_keyword_backend.cpp)
     target_link_libraries(test_asr_keyword_backend asr SherpaOnnx::c-api)
+
+    ament_add_gtest(test_asr_keyword_wake_detector test/test_keyword_wake_detector.cpp)
+    target_link_libraries(test_asr_keyword_wake_detector asr SherpaOnnx::c-api)
 endif ()
 
 install(TARGETS asr

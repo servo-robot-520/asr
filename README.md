@@ -64,6 +64,45 @@ class AsrBackend {
 `sense_voice` 事件顺序为 `EVENT_SPEECH_START` → `EVENT_ENDPOINT` → `EVENT_FINAL`；
 `keyword` 只发 `EVENT_FINAL`（命中关键词），AsrNode 会为它生成 `EVENT_SPEECH_START` 会话。
 
+## 唤醒词（wake）
+
+`wake.enabled=true` 时，`asr` 常开一个轻量 KWS 检测器；只有命中唤醒词后，主 backend 才在
+识别窗口内运行：
+
+```yaml
+wake:
+  enabled: true
+  keywords_file: /opt/sherpa-onnx/models/kws/wake_keywords.txt  # @ 后是“小鸭小鸭”
+  pre_roll_ms: 1000
+  followup_timeout_ms: 6000
+```
+
+唤醒 KWS 复用 `keyword.encoder/decoder/joiner/tokens`，但 `wake.keywords_file` 是独立的
+唤醒词表；`keyword.keywords_file` 是 keyword 后端的命令词表。
+
+流程：
+
+```text
+KWS 命中 → EVENT_WAKE → pre-roll + 后续音频送主 ASR
+         → EVENT_FINAL（含唤醒词和命令，或只有命令）→ 会话结束
+```
+
+- **一次说完**：`小鸭小鸭，当前电量是多少`。pre-roll 保证命令开头不被 KWS 延迟切掉；
+  `duck_asr` 应给 ack 加 300–500 ms 延迟，并在收到 `EVENT_SPEECH_START` 时取消 ack。
+- **分两次说**：`小鸭小鸭` → 停顿 → 用户说命令。唤醒窗口保持 `followup_timeout_ms`；
+  播放 ack 期间 `AsrNode` 暂停会话、不取消；播放结束后重新计时并继续等命令。
+- ASR 只识别到唤醒词时（例如 SenseVoice 把单独的“小鸭小鸭”转成文本），不会被当作命令结束会话；
+  `followup_timeout_ms` 到期才发 `EVENT_CANCELED`。
+
+ack（“我在”）属于 `duck_asr` 的交互策略，不属于 `asr`；`asr` 只提供 `EVENT_WAKE`、
+`EVENT_SPEECH_START` 和播放门控暂停/恢复能力。若 `duck_asr` 选择每次唤醒立即播放 ack，
+一次说完的命令会被播放门控挡住；需要 AEC/全双工才能同时成立。
+
+```text
+无 wake 时：所有音频直接送 backend（free_asr）
+有 wake 时：Idle KWS → WAKE → Listening → FINAL/超时 → Idle
+```
+
 ## 接口
 
 节点默认全名 `/asr`，话题相对于节点私有命名空间。
@@ -244,6 +283,10 @@ audio_io 事件 = audio_io_interface::topic_event(kDefaultNodeFqn, asr 的 names
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |
 | `backend` | `sense_voice` | `sense_voice` / `keyword` |
+| `wake.enabled` | `false` | 启用常开唤醒词阶段 |
+| `wake.keywords_file` | `/opt/sherpa-onnx/models/kws/wake_keywords.txt` | 唤醒词表；`@` 后为显示词 |
+| `wake.pre_roll_ms` | `1000` | 唤醒前保留音频，避免命令开头被切掉 |
+| `wake.followup_timeout_ms` | `6000` | 唤醒后等待命令的窗口 |
 | `capture.stream_id` | `mic` | 只接受该 `stream_id`；空 = 任意 |
 | `gate.enabled` | `true` | 播放时暂停识别 |
 | `gate.holdoff_ms` | `300` | 播放结束后的静音保持 |
@@ -341,11 +384,13 @@ colcon test --packages-select asr
 
 ## 已知限制
 
-- `sense_voice` 没有唤醒词：VAD 检测到语音就会转写；`keyword` 后端就是轻量 KWS，适合固定词。
+- `wake.enabled=false` 时：`sense_voice` 由 VAD 触发，`keyword` 直接检测关键词。
+- `wake.enabled=true` 时：常开 KWS 未命中前主 backend 不运行；命中后进入 `wake.followup_timeout_ms` 窗口。
 - SenseVoice 是离线模型，不支持流式 partial；`EVENT_PARTIAL` 当前不会发布。
 - `keyword` 只输出命中的关键词，不是任意文本转写；关键词文件需要预先 text2token。
 - 一次只处理一个句段/关键词流，识别期间新音频进入有界队列；长句/慢模型可能导致丢帧。
 - 模型文件不随包分发，需按上面的步骤下载；使用前请确认模型和 sherpa-onnx 的上游许可证。
 
 设计背景：[`docs/duck-ros2-asr-architecture.zh-CN.md`](../../docs/duck-ros2-asr-architecture.zh-CN.md)。
+本包设计与架构：[`docs/asr-architecture.zh-CN.md`](docs/asr-architecture.zh-CN.md)。
 接口定义：[`src/asr_interface`](../asr_interface)。

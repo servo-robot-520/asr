@@ -19,6 +19,14 @@
       holdoff_ms: 300
       max_ms: 15000
 
+    # 可选唤醒词阶段：启用后主 backend 只在唤醒窗口内运行，
+    # 唤醒 KWS 复用下面的 keyword.* 模型配置。
+    wake:
+      enabled: false
+      keywords_file: /opt/sherpa-onnx/models/kws/wake_keywords.txt
+      pre_roll_ms: 1000
+      followup_timeout_ms: 6000
+
     # 采集回调到工作线程的有界队列；超过后丢弃最旧数据。
     queue:
       max_ms: 2000
@@ -49,7 +57,8 @@
       provider: cpu
       debug: false
 
-    # sherpa-onnx KWS 模型；backend=keyword 时使用。
+    # sherpa-onnx KWS 模型；backend=keyword 时用于命令词，
+    # wake.enabled=true 时也用于唤醒词检测。
     keyword:
       encoder: /opt/sherpa-onnx/models/kws/encoder-epoch-13-avg-2-chunk-16-left-64.int8.onnx
       decoder: /opt/sherpa-onnx/models/kws/decoder-epoch-13-avg-2-chunk-16-left-64.onnx

@@ -52,6 +52,12 @@ namespace asr {
         gate_max_ms_ = std::max(gate_holdoff_ms_, declare_or_get<int>("gate.max_ms", 15000));
         state_period_ms_ = std::max(50, declare_or_get<int>("state.period_ms", 500));
         queue_max_ms_ = std::max(100, declare_or_get<int>("queue.max_ms", 2000));
+
+        wake_enabled_ = declare_or_get<bool>("wake.enabled", false);
+        const auto pre_roll_ms = std::max(0, declare_or_get<int>("wake.pre_roll_ms", 1000));
+        pre_roll_capacity_ = static_cast<std::size_t>(kTargetSampleRate) *
+            static_cast<std::size_t>(pre_roll_ms) / 1000U;
+        followup_timeout_ms_ = std::max(1000, declare_or_get<int>("wake.followup_timeout_ms", 6000));
     }
 
     void AsrNode::initialize_backends() {
@@ -74,6 +80,25 @@ namespace asr {
         model_loaded_ = backend_->ok();
         LOG_INFO("ASR backend: type={} name={} model_loaded={}",
                  backend_type_, backend_->name(), model_loaded_.load());
+
+        if (!wake_enabled_) {
+            return;
+        }
+
+        std::string wake_error;
+        wake_detector_ = create_wake_word_detector(*node_, &wake_error);
+        if (!wake_detector_ || !wake_detector_->initialize(&wake_error)) {
+            wake_ready_ = false;
+            set_last_error("wake: " + wake_error);
+            LOG_ERROR("ASR wake detector unavailable: {}", wake_error);
+            return;
+        }
+
+        wake_labels_ = wake_detector_->labels();
+        wake_ready_ = true;
+        LOG_INFO("ASR wake detector: name={} labels={} followup_ms={} pre_roll_ms={}",
+                 wake_detector_->name(), wake_labels_.size(), followup_timeout_ms_,
+                 pre_roll_capacity_ * 1000U / kTargetSampleRate);
     }
 
     void AsrNode::create_interfaces() {
@@ -136,6 +161,9 @@ namespace asr {
 
     void AsrNode::on_capture(const audio_io_interface::msg::AudioStream::SharedPtr& message) {
         if (!model_loaded_.load()) {
+            return;
+        }
+        if (wake_enabled_ && !wake_ready_) {
             return;
         }
         if (!stream_id_.empty() && message->stream_id != stream_id_) {
@@ -217,6 +245,7 @@ namespace asr {
         }
 
         bool cancel_session = false;
+        bool pause_wake_session = false;
         {
             std::lock_guard lock(gate_mutex_);
             if (message->event == audio_io_interface::msg::AudioEvent::EVENT_STARTED) {
@@ -226,7 +255,12 @@ namespace asr {
                 ++active_playbacks_;
                 gate_release_valid_ = false;
                 gated_ = true;
-                cancel_session = true;
+                // 唤醒窗口内播放“我在”不应取消会话；暂停后等播放结束继续等命令。
+                pause_wake_session = wake_enabled_ && session_active_.load();
+                if (pause_wake_session) {
+                    gate_pause_wake_ = true;
+                }
+                cancel_session = !pause_wake_session;
             }
             else if (message->event == audio_io_interface::msg::AudioEvent::EVENT_FINISHED ||
                      message->event == audio_io_interface::msg::AudioEvent::EVENT_FAILED ||
@@ -241,8 +275,8 @@ namespace asr {
             }
         }
 
-        if (cancel_session) {
-            request_reset();
+        if (cancel_session || pause_wake_session) {
+            request_reset(cancel_session);
         }
     }
 
@@ -258,24 +292,30 @@ namespace asr {
         if (active_playbacks_ == 0 && gate_release_valid_ && now >= gate_release_at_) {
             gated_ = false;
             gate_release_valid_ = false;
+            if (gate_pause_wake_.exchange(false)) {
+                resume_wake_ = true;
+            }
             LOG_DEBUG("ASR gate released after playback holdoff");
         }
         if (now - gate_started_ >= std::chrono::milliseconds(gate_max_ms_)) {
             active_playbacks_ = 0;
             gate_release_valid_ = false;
             gated_ = false;
+            if (gate_pause_wake_.exchange(false)) {
+                resume_wake_ = true;
+            }
             LOG_WARN("ASR gate forced open after {} ms", gate_max_ms_);
         }
     }
 
-    void AsrNode::request_reset() {
+    void AsrNode::request_reset(const bool cancel_session) {
         reset_requested_ = true;
         {
             std::lock_guard lock(queue_mutex_);
             queue_.clear();
             queued_ms_ = 0.0;
         }
-        if (session_active_.exchange(false)) {
+        if (cancel_session && session_active_.exchange(false)) {
             publish_event(asr_interface::msg::AsrEvent::EVENT_CANCELED, "", "", "");
         }
     }
@@ -304,6 +344,19 @@ namespace asr {
                 if (backend_) {
                     backend_->reset();
                 }
+            }
+            if (resume_wake_.exchange(false)) {
+                if (backend_) {
+                    backend_->reset();
+                }
+                if (session_active_.load() && listening_) {
+                    listen_deadline_ = steady_now() + std::chrono::milliseconds(followup_timeout_ms_);
+                }
+                pre_roll_.clear();
+            }
+            if (!session_active_.load()) {
+                listening_ = false;
+                pre_roll_.clear();
             }
 
             try {
@@ -357,10 +410,15 @@ namespace asr {
             return;
         }
         if (chunk.eos) {
-            handle_backend_events(backend_->flush());
+            if (listening_ || !wake_enabled_) {
+                handle_backend_events(backend_->flush());
+            }
             return;
         }
         if (gated_.load() || !model_loaded_.load()) {
+            return;
+        }
+        if (wake_enabled_ && !wake_ready_) {
             return;
         }
 
@@ -369,7 +427,65 @@ namespace asr {
             return;
         }
 
-        handle_backend_events(backend_->push(samples.data(), samples.size()));
+        if (!wake_enabled_) {
+            handle_backend_events(backend_->push(samples.data(), samples.size()));
+            return;
+        }
+
+        if (listening_) {
+            check_listen_timeout();
+            if (!listening_) {
+                return;
+            }
+            handle_backend_events(backend_->push(samples.data(), samples.size()));
+            return;
+        }
+
+        // 未唤醒：只跑 KWS，把音频留给唤醒后的 ASR 做 pre-roll。
+        pre_roll_.insert(pre_roll_.end(), samples.begin(), samples.end());
+        if (pre_roll_.size() > pre_roll_capacity_) {
+            pre_roll_.erase(pre_roll_.begin(),
+                            pre_roll_.begin() +
+                                static_cast<std::ptrdiff_t>(pre_roll_.size() - pre_roll_capacity_));
+        }
+
+        if (wake_detector_) {
+            const auto wakes = wake_detector_->push(samples.data(), samples.size());
+            if (!wakes.empty()) {
+                start_wake_session(wakes.front().keyword, samples);
+            }
+        }
+    }
+
+    void AsrNode::start_wake_session(const std::string& keyword,
+                                     const std::vector<float>& samples) {
+        if (listening_) {
+            return;
+        }
+        listening_ = true;
+        begin_session(false);
+        listen_deadline_ = steady_now() + std::chrono::milliseconds(followup_timeout_ms_);
+        publish_event(asr_interface::msg::AsrEvent::EVENT_WAKE, keyword, "", "",
+                      wake_detector_ ? std::string{wake_detector_->name()} : std::string{});
+        publish_event(asr_interface::msg::AsrEvent::EVENT_SPEECH_START, "", "", "");
+
+        // pre_roll_ 已包含当前块；一次性送入主 ASR，覆盖“唤醒词后立刻说命令”。
+        if (!pre_roll_.empty()) {
+            handle_backend_events(backend_->push(pre_roll_.data(), pre_roll_.size()));
+            pre_roll_.clear();
+        }
+        else {
+            handle_backend_events(backend_->push(samples.data(), samples.size()));
+        }
+    }
+
+    void AsrNode::check_listen_timeout() {
+        if (!listening_ || steady_now() < listen_deadline_) {
+            return;
+        }
+        LOG_DEBUG("ASR wake session timed out after {} ms", followup_timeout_ms_);
+        publish_event(asr_interface::msg::AsrEvent::EVENT_CANCELED, "", "", "");
+        end_session();
     }
 
     void AsrNode::handle_backend_events(const std::vector<BackendEvent>& events) {
@@ -400,6 +516,11 @@ namespace asr {
                 if (!session_active_.load()) {
                     begin_session();
                 }
+                if (wake_enabled_ && listening_ && is_wake_only(event.text)) {
+                    LOG_DEBUG("ASR final contains only the wake word; keep listening");
+                    listen_deadline_ = steady_now() + std::chrono::milliseconds(followup_timeout_ms_);
+                    continue;
+                }
                 set_last_error("");
                 {
                     std::string session_id;
@@ -425,30 +546,45 @@ namespace asr {
         }
     }
 
-    void AsrNode::begin_session() {
+    void AsrNode::begin_session(const bool publish_start) {
         session_active_ = true;
         {
             std::lock_guard lock(state_mutex_);
             current_session_id_ = std::to_string(++session_counter_);
         }
-        publish_event(asr_interface::msg::AsrEvent::EVENT_SPEECH_START, "", "", "");
+        if (publish_start) {
+            publish_event(asr_interface::msg::AsrEvent::EVENT_SPEECH_START, "", "", "");
+        }
     }
 
     void AsrNode::end_session() {
         session_active_ = false;
+        listening_ = false;
+        pre_roll_.clear();
+        gate_pause_wake_ = false;
+        resume_wake_ = false;
+        if (wake_detector_) {
+            wake_detector_->reset();
+        }
         std::lock_guard lock(state_mutex_);
         current_session_id_.clear();
     }
 
     void AsrNode::publish_event(const uint8_t event, const std::string& text,
-                                const std::string& language, const std::string& error) const {
+                                const std::string& language, const std::string& error,
+                                const std::string& backend_override) const {
         asr_interface::msg::AsrEvent message;
         message.header.stamp = node_->now();
         message.header.frame_id = frame_id_;
         message.event = event;
         message.text = text;
         message.language = language;
-        message.backend = backend_ ? std::string{backend_->name()} : backend_type_;
+        if (!backend_override.empty()) {
+            message.backend = backend_override;
+        }
+        else {
+            message.backend = backend_ ? std::string{backend_->name()} : backend_type_;
+        }
         message.error = error;
         message.confidence = 0.0F;
         {
@@ -464,7 +600,12 @@ namespace asr {
         message.header.frame_id = frame_id_;
         message.backend = backend_ ? std::string{backend_->name()} : backend_type_;
         message.model_loaded = model_loaded_.load();
-        message.mode = "free_asr";
+        if (!wake_enabled_) {
+            message.mode = "free_asr";
+        }
+        else {
+            message.mode = wake_ready_ ? "wake_command" : "wake_error";
+        }
         message.enabled = true;
         message.gated = gated_.load();
         message.session_active = session_active_.load();
@@ -479,6 +620,48 @@ namespace asr {
     void AsrNode::set_last_error(std::string error) {
         std::lock_guard lock(state_mutex_);
         last_error_ = std::move(error);
+    }
+
+    std::string AsrNode::normalize_wake_text(const std::string_view text) {
+        std::string normalized{text};
+        for (const std::string_view token : {
+                 " ",
+                 "\t",
+                 "\n",
+                 "\r",
+                 ",",
+                 ".",
+                 "!",
+                 "?",
+                 ";",
+                 ":",
+                 "，",
+                 "。",
+                 "！",
+                 "？",
+                 "；",
+                 "：",
+                 "、",
+             }) {
+            std::size_t position = 0;
+            while ((position = normalized.find(token, position)) != std::string::npos) {
+                normalized.erase(position, token.size());
+            }
+        }
+        return normalized;
+    }
+
+    bool AsrNode::is_wake_only(const std::string_view text) const {
+        const auto normalized = normalize_wake_text(text);
+        if (normalized.empty()) {
+            return false;
+        }
+        for (const auto& label : wake_labels_) {
+            if (normalize_wake_text(label) == normalized) {
+                return true;
+            }
+        }
+        return false;
     }
 
 } // namespace asr

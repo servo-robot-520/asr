@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "asr/keyword_backend.hpp"
+#include "asr/keyword_wake_detector.hpp"
 #include "asr/sense_voice_backend.hpp"
 
 namespace asr {
@@ -48,13 +49,12 @@ namespace asr {
             return std::make_unique<SenseVoiceBackend>(std::move(config));
         }
 
-        std::unique_ptr<AsrBackend> create_keyword(rclcpp::Node& node) {
+        KeywordBackendConfig read_keyword_config(rclcpp::Node& node) {
             KeywordBackendConfig config;
             config.encoder = declare_or_get<std::string>(node, "keyword.encoder", "");
             config.decoder = declare_or_get<std::string>(node, "keyword.decoder", "");
             config.joiner = declare_or_get<std::string>(node, "keyword.joiner", "");
             config.tokens = declare_or_get<std::string>(node, "keyword.tokens", "");
-            config.keywords_file = declare_or_get<std::string>(node, "keyword.keywords_file", "");
             config.max_active_paths =
                 std::max(1, declare_or_get<int>(node, "keyword.max_active_paths", 4));
             config.num_trailing_blanks =
@@ -65,7 +65,12 @@ namespace asr {
             config.num_threads = std::max(1, declare_or_get<int>(node, "keyword.num_threads", 1));
             config.provider = declare_or_get<std::string>(node, "keyword.provider", "cpu");
             config.debug = declare_or_get<bool>(node, "keyword.debug", false);
+            return config;
+        }
 
+        std::unique_ptr<AsrBackend> create_keyword(rclcpp::Node& node) {
+            auto config = read_keyword_config(node);
+            config.keywords_file = declare_or_get<std::string>(node, "keyword.keywords_file", "");
             return std::make_unique<KeywordBackend>(std::move(config));
         }
 
@@ -85,6 +90,19 @@ namespace asr {
                 "'; supported: sense_voice, keyword";
         }
         return nullptr;
+    }
+
+    std::unique_ptr<WakeWordDetector> create_wake_word_detector(rclcpp::Node& node,
+                                                                std::string* error) {
+        auto config = read_keyword_config(node);
+        config.keywords_file = declare_or_get<std::string>(node, "wake.keywords_file", "");
+        if (config.keywords_file.empty()) {
+            if (error != nullptr) {
+                *error = "wake.keywords_file must be set when wake.enabled=true";
+            }
+            return nullptr;
+        }
+        return std::make_unique<KeywordWakeDetector>(std::move(config));
     }
 
 } // namespace asr

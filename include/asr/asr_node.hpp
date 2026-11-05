@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -16,6 +17,7 @@
 
 #include "asr/asr_backend.hpp"
 #include "asr/linear_resampler.hpp"
+#include "asr/wake_word_detector.hpp"
 #include "asr_interface/msg/asr_event.hpp"
 #include "asr_interface/msg/asr_state.hpp"
 #include "audio_io_interface/msg/audio_event.hpp"
@@ -78,18 +80,23 @@ namespace asr {
         void worker_loop();
         void process_chunk(const CaptureChunk& chunk);
         void handle_backend_events(const std::vector<BackendEvent>& events);
-        void begin_session();
+        void start_wake_session(const std::string& keyword, const std::vector<float>& samples);
+        void check_listen_timeout();
+        void begin_session(bool publish_start = true);
         void end_session();
-        void request_reset();
+        void request_reset(bool cancel_session = true);
 
         void update_gate();
         void publish_state() const;
         void publish_event(uint8_t event, const std::string& text,
-                           const std::string& language, const std::string& error) const;
+                           const std::string& language, const std::string& error,
+                           const std::string& backend_override = {}) const;
         void set_last_error(std::string error);
 
         [[nodiscard]] std::vector<float> to_16k_mono(const CaptureChunk& chunk);
         [[nodiscard]] static std::size_t bytes_per_sample(const std::string& encoding);
+        [[nodiscard]] static std::string normalize_wake_text(std::string_view text);
+        [[nodiscard]] bool is_wake_only(std::string_view text) const;
 
         template <typename T>
         T declare_or_get(const std::string& name, const T& default_value) {
@@ -111,6 +118,16 @@ namespace asr {
 
         std::string backend_type_;
         std::unique_ptr<AsrBackend> backend_;
+        std::unique_ptr<WakeWordDetector> wake_detector_;
+        std::vector<std::string> wake_labels_;
+        bool wake_enabled_{false};
+        bool wake_ready_{false};
+        int followup_timeout_ms_{6000};
+        std::vector<float> pre_roll_;
+        std::size_t pre_roll_capacity_{0};
+        bool listening_{false};
+        std::chrono::steady_clock::time_point listen_deadline_{};
+
         std::string capture_topic_;
         std::string stream_id_;
         std::string frame_id_;
@@ -147,6 +164,8 @@ namespace asr {
         std::mutex gate_mutex_;
         int active_playbacks_{0};
         bool gate_release_valid_{false};
+        std::atomic<bool> gate_pause_wake_{false};
+        std::atomic<bool> resume_wake_{false};
         std::chrono::steady_clock::time_point gate_started_{};
         std::chrono::steady_clock::time_point gate_release_at_{};
     };

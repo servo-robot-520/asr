@@ -122,6 +122,19 @@ colcon build --base-paths src --packages-up-to asr \
 > 需要 C++23（GCC 13+）。如果只构建本包，先确保 `common_cpp`、`audio_io_interface`、
 > `asr_interface` 已构建或安装。
 
+### CLion / 根工程聚合构建
+
+CLion 使用仓库根 `CMakeLists.txt` 时会直接配置 `src/asr`，因此必须让 CMake 能找到
+sherpa-onnx：
+
+- 推荐按上面的步骤安装到 `/opt/sherpa-onnx`；或
+- 在 `Settings → Build, Execution, Deployment → CMake → CMake options` 增加
+  `-DSHERPA_ONNX_ROOT=/path/to/sherpa-onnx`；或
+- 在启动 CLion 前导出 `SHERPA_ONNX_ROOT`。
+
+修改后执行 `Tools → CMake → Reset Cache and Reload Project`。之前失败过一次的
+`cmake-build-*` 缓存通常可以直接恢复；如果仍报找不到，删除该构建目录后重新加载。
+
 构建产物：
 
 ```text

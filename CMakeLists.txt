@@ -139,7 +139,7 @@ if (BUILD_EXE)
     install(TARGETS asr_node
             DESTINATION lib/${PROJECT_NAME}
     )
-    install(DIRECTORY config launch tools
+    install(DIRECTORY config launch tools docs
             DESTINATION share/${PROJECT_NAME}
             PATTERN "__pycache__" EXCLUDE
             PATTERN "*.pyc" EXCLUDE

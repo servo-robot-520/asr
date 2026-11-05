@@ -161,6 +161,9 @@ sudo cp /opt/sherpa-onnx/models/kws/test_wavs/keywords.txt \
 `keywords_raw.txt`，再按 sherpa-onnx 文档用 `sherpa-onnx-cli text2token` 生成。
 模型自带的 `test_wavs/keywords.txt` 可直接用于联调。
 
+两个文件的完整格式、生成命令和常见错误见
+[`docs/kws-model-files.zh-CN.md`](docs/kws-model-files.zh-CN.md)。
+
 ## 构建
 
 ```bash

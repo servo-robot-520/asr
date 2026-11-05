@@ -39,63 +39,29 @@ namespace asr {
 
     } // namespace detail
 
-    /// 把配置中的节点名解析成绝对 FQN。
+    /// 把接口包提供的默认节点全名限定到当前节点的 namespace。
     ///
-    /// - 以 '/' 开头：按绝对名称使用，便于跨 namespace 显式指定；
-    /// - 其他：拼到当前节点 namespace 后面。
-    ///
-    /// 例如 namespace=/robot1、configured=audio_io 得到 /robot1/audio_io；
-    /// namespace=/、configured=audio_io 得到 /audio_io。
-    [[nodiscard]] inline std::string resolve_node_fqn(const std::string_view node_namespace,
-                                                      const std::string_view configured) {
-        const auto name = detail::trim_ascii(configured);
-        if (name.empty()) {
-            throw std::invalid_argument("audio_io.node must not be empty");
+    /// `audio_io_interface::kDefaultNodeFqn` 是根 namespace 下的 `/audio_io`；
+    /// 当 asr 运行在 `/robot1/asr` 时，本函数得到 `/robot1/audio_io`。
+    /// 之后可直接把该 FQN 传给 `topic_capture()` / `topic_event()`。
+    [[nodiscard]] inline std::string qualify_node_fqn(const std::string_view node_namespace,
+                                                      const std::string_view default_node_fqn) {
+        const auto base = detail::trim_ascii(default_node_fqn);
+        if (base.empty() || base == "/" || base.front() != '/') {
+            throw std::invalid_argument("default node FQN must be absolute and non-root");
         }
 
-        std::string resolved;
-        if (name.front() == '/') {
-            resolved = std::string{name};
+        auto ns = detail::trim_trailing_slashes(node_namespace);
+        if (ns.empty()) {
+            ns = "/";
         }
-        else {
-            auto ns = detail::trim_trailing_slashes(node_namespace);
-            if (ns.empty()) {
-                ns = "/";
-            }
-            resolved = ns == "/" ? "/" + std::string{name} : std::string{ns} + "/" + std::string{name};
+        if (ns != "/") {
+            detail::require_absolute_ros_name(ns, "node namespace");
         }
 
+        std::string resolved = ns == "/" ? std::string{base} : std::string{ns} + std::string{base};
         resolved = std::string{detail::trim_trailing_slashes(resolved)};
-        detail::require_absolute_ros_name(resolved, "audio_io.node");
-        return resolved;
-    }
-
-    /// 把配置中的话题名解析成绝对名称。
-    ///
-    /// 默认话题名是相对名（如 audio_io/capture），随节点 namespace 自动解析；
-    /// 以 '/' 开头时按绝对名称使用。私有名 `~` 不支持，避免把 audio_io 的话题
-    /// 错解析到 asr 节点自身。
-    [[nodiscard]] inline std::string resolve_topic_name(const std::string_view node_namespace,
-                                                        const std::string_view configured) {
-        const auto name = detail::trim_ascii(configured);
-        if (name.empty()) {
-            throw std::invalid_argument("capture.topic must not be empty");
-        }
-
-        std::string resolved;
-        if (name.front() == '/') {
-            resolved = std::string{name};
-        }
-        else {
-            auto ns = detail::trim_trailing_slashes(node_namespace);
-            if (ns.empty()) {
-                ns = "/";
-            }
-            resolved = ns == "/" ? "/" + std::string{name} : std::string{ns} + "/" + std::string{name};
-        }
-
-        resolved = std::string{detail::trim_trailing_slashes(resolved)};
-        detail::require_absolute_ros_name(resolved, "capture.topic");
+        detail::require_absolute_ros_name(resolved, "resolved node FQN");
         return resolved;
     }
 

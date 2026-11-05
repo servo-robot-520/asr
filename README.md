@@ -175,14 +175,19 @@ python3 install/asr/share/asr/tools/replay_capture.py /path/to/test.wav
 
 默认值见 [`config/asr.yaml`](config/asr.yaml)。
 
-`audio_io.node` 和 `capture.topic` 默认都是相对名：`asr` 会自动拼上自己的 namespace。
-如果两者使用同一 namespace，**不需要在参数文件里补 namespace**。
+`audio_io` 的节点全名不通过参数配置：
+
+```text
+audio_io_fqn  = qualify_node_fqn(asr 的 namespace, audio_io_interface::kDefaultNodeFqn)
+capture.topic = audio_io_interface::topic_capture(audio_io_fqn)
+audio_io 事件 = audio_io_interface::topic_event(audio_io_fqn)
+```
+
+因此 `audio_io` 与 `asr` 使用同一 namespace 时无需修改任何配置文件。
 
 | 参数 | 默认 | 说明 |
 | --- | --- | --- |
-| `capture.topic` | `<audio_io.node>/capture` | 订阅的 `AudioStream` 话题；相对名随 namespace 解析 |
 | `capture.stream_id` | `mic` | 只接受该 `stream_id`；空 = 任意 |
-| `audio_io.node` | `audio_io` | 播放门控事件来源；相对名随 namespace 解析 |
 | `gate.enabled` | `true` | 播放时暂停识别 |
 | `gate.holdoff_ms` | `300` | 播放结束后的静音保持 |
 | `gate.max_ms` | `15000` | 门控兜底，避免事件丢失导致永久静音 |
@@ -213,17 +218,8 @@ capture.topic  → /robot1/audio_io/capture
 audio_io event → /robot1/audio_io/event
 ```
 
-如果 `audio_io` 的节点名或 namespace 与 `asr` 不同，才需要显式设置：
-
-```yaml
-audio_io:
-  node: /other_ns/audio_io   # 绝对名：不随 asr 的 namespace 解析
-capture:
-  topic: /other_ns/audio_io/capture
-```
-
-`audio_io.node` 也支持相对名，例如 `audio_io`；`capture.topic` 留空/不写时自动使用
-`<audio_io.node>/capture`。
+当前实现假设 `audio_io` 与 `asr` 在同一 namespace，并使用接口包给出的默认节点名
+`audio_io`；没有单独的 `audio_io.node` / `capture.topic` 覆盖参数。
 
 ## 测试
 

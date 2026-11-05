@@ -5,14 +5,11 @@
       log_path: ./log
       async: false
 
-    # audio_io 名称默认是相对名；与 asr 同 namespace 时自动解析为
-    # /<namespace>/audio_io，不需要手工补 namespace。
-    # capture.topic 不填时自动使用 <audio_io.node>/capture。
+    # audio_io 的节点名与 capture/event 话题由 audio_io_interface 的
+    # kDefaultNodeFqn/topic_capture/topic_event 统一生成，并自动加上
+    # asr 当前 namespace；这里不需要配置节点名或采集话题。
     capture:
       stream_id: mic
-    audio_io:
-      node: audio_io
-
     # 播放门控：机器人自己说话时不接收麦克风，避免自触发。
     gate:
       enabled: true

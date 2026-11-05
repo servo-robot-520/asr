@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "asr/ros_names.hpp"
+#include "asr_interface/ros_msg.hpp"
 #include "audio_io_interface/ros_msg.hpp"
 #include "common_cpp/logging/log_interface/log_macro.hpp"
 
@@ -40,14 +41,10 @@ namespace asr {
     }
 
     void AsrNode::declare_parameters() {
-        // audio_io.node 默认是相对名；同一 namespace 下 asr 和 audio_io 会自动
-        // 解析到 /<ns>/audio_io，不需要在配置文件里重复 namespace。
-        const auto configured_audio_io = declare_or_get<std::string>("audio_io.node", "audio_io");
-        audio_io_node_ = resolve_node_fqn(node_->get_namespace(), configured_audio_io);
-        const auto configured_capture = declare_or_get<std::string>("capture.topic", "");
-        capture_topic_ = resolve_topic_name(
-            node_->get_namespace(),
-            configured_capture.empty() ? audio_io_node_ + "/capture" : configured_capture);
+        // audio_io 的默认节点名来自 audio_io_interface，不在本包重复配置；
+        // 只把它限定到 asr 当前 namespace，再用官方 helper 生成话题名。
+        audio_io_node_ = qualify_node_fqn(node_->get_namespace(), audio_io_interface::kDefaultNodeFqn);
+        capture_topic_ = audio_io_interface::topic_capture(audio_io_node_);
         stream_id_ = declare_or_get<std::string>("capture.stream_id", "mic");
         frame_id_ = declare_or_get<std::string>("frame_id", "mic");
 
@@ -102,9 +99,9 @@ namespace asr {
 
     void AsrNode::create_interfaces() {
         event_publisher_ = node_->create_publisher<asr_interface::msg::AsrEvent>(
-            "~/event", rclcpp::QoS(50));
+            std::string(asr_interface::kPrivateTopicEvent), rclcpp::QoS(50));
         state_publisher_ = node_->create_publisher<asr_interface::msg::AsrState>(
-            "~/state", rclcpp::QoS(1).transient_local());
+            std::string(asr_interface::kPrivateTopicState), rclcpp::QoS(1).transient_local());
 
         capture_subscription_ = node_->create_subscription<audio_io_interface::msg::AudioStream>(
             capture_topic_, rclcpp::QoS(2).best_effort(),
@@ -112,18 +109,12 @@ namespace asr {
                 on_capture(message);
             });
 
-        try {
-            const auto audio_event_topic = audio_io_interface::topic_event(audio_io_node_);
-            audio_event_subscription_ = node_->create_subscription<audio_io_interface::msg::AudioEvent>(
-                audio_event_topic, rclcpp::QoS(50),
-                [this](const audio_io_interface::msg::AudioEvent::SharedPtr message) {
-                    on_audio_event(message);
-                });
-        }
-        catch (const std::exception& exception) {
-            LOG_WARN("ASR gate disabled: invalid audio_io.node '{}': {}",
-                     audio_io_node_, exception.what());
-        }
+        const auto audio_event_topic = audio_io_interface::topic_event(audio_io_node_);
+        audio_event_subscription_ = node_->create_subscription<audio_io_interface::msg::AudioEvent>(
+            audio_event_topic, rclcpp::QoS(50),
+            [this](const audio_io_interface::msg::AudioEvent::SharedPtr message) {
+                on_audio_event(message);
+            });
 
         state_timer_ = node_->create_wall_timer(
             std::chrono::milliseconds(state_period_ms_),

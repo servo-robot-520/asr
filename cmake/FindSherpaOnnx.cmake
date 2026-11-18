@@ -4,6 +4,15 @@
 # /opt/sherpa-onnx、/usr/local 查找。可显式传入：
 #   -DSHERPA_ONNX_ROOT=/opt/sherpa-onnx
 
+# 缓存的查找结果指向已被删除/移动的目录时作废，重新查找。
+# 典型场景：/tmp 下的临时解压目录被清理，而 CMakeCache 仍记录旧路径。
+foreach (_sherpa_cached_var SherpaOnnx_INCLUDE_DIR SherpaOnnx_C_API_LIBRARY SherpaOnnx_ONNXRUNTIME_LIBRARY)
+    if (DEFINED ${_sherpa_cached_var} AND NOT EXISTS "${${_sherpa_cached_var}}")
+        unset(${_sherpa_cached_var} CACHE)
+    endif ()
+endforeach ()
+unset(_sherpa_cached_var)
+
 find_path(SherpaOnnx_INCLUDE_DIR
         NAMES sherpa-onnx/c-api/c-api.h
         HINTS ${SHERPA_ONNX_ROOT} ENV SHERPA_ONNX_ROOT
